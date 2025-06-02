@@ -45,9 +45,30 @@ services:
       # À ENLEVER/COMMENTER APRÈS LA PREMIÈRE CONNEXION ET CRÉATION DE COMPTE !
       # - N8N_USER_MANAGEMENT_ENABLED=true
       # - N8N_USERS_ALLOW_SIGNUP=true
-
     networks:
       - otobot_backend_network # Connexion au réseau interne du projet
+
+
+  # --- Service pgAdmin ---
+  pgadmin:
+    image: dpage/pgadmin4:latest # Image officielle de pgAdmin
+    container_name: otobot_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: nicolas.zaug@gmail.com # Email pour vous connecter à pgAdmin
+      PGADMIN_DEFAULT_PASSWORD: Lootre99 # Mot de passe FORT pour pgAdmin
+      PGADMIN_LISTEN_PORT: 80 # Port interne de pgAdmin, sera mappé ci-dessous
+    ports:
+      - "5050:80" # Mappe le port 80 de pgAdmin au port 5050 du VPS (vous pouvez choisir un autre port VPS)
+    volumes:
+      - ~/Docker_Volumes/pgadmin_data:/var/lib/pgadmin # Persistance des données et configurations de pgAdmin
+    networks:
+      - otobot_backend_network # Connexion au réseau interne commun
+    depends_on: # S'assure que PostgreSQL démarre avant pgAdmin
+      - postgres
+
+
+
 
 # --- Définition des réseaux Docker ---
 networks:
