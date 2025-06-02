@@ -1,0 +1,25 @@
+# Fichiers d'environnement locaux - NE JAMAIS COMMITTER
+.env
+.env.*
+!/.env.example
+
+# Données et volumes Docker locaux (si vous mappez des dossiers locaux pour les data)
+# Adapter si vous utilisez des chemins spécifiques pour les données en local
+# Exemple : si vous aviez des dossiers n8ndata/ postgresdata/ directement dans le projet local
+# n8ndata/
+# postgresdata/
+
+# Fichiers système et de log
+*.log
+.DS_Store
+Thumbs.db
+
+# Répertoires générés par des outils
+node_modules/
+__pycache__/
+*.pyc
+
+# Fichiers liés à des IDE spécifiques
+.vscode/
+.idea/
+
