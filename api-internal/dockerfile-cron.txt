@@ -1,0 +1,31 @@
+# Dockerfile.cron pour le service de refresh automatique
+FROM node:18-alpine
+
+# Installer cron et les dépendances
+RUN apk add --no-cache \
+    dcron \
+    libcap \
+    curl
+
+# Créer le répertoire de l'application
+WORKDIR /app
+
+# Copier le script de refresh
+COPY token-refresher.js .
+COPY package*.json ./
+
+# Installer les dépendances minimales
+RUN npm install axios
+
+# Créer le script cron
+RUN echo "*/30 * * * * node /app/token-refresher.js >> /var/log/cron.log 2>&1" > /etc/crontabs/root
+
+# Script d'entrée
+COPY docker-entrypoint-cron.sh /
+RUN chmod +x /docker-entrypoint-cron.sh
+
+# Créer le fichier de log
+RUN touch /var/log/cron.log
+
+# Commande de démarrage
+CMD ["/docker-entrypoint-cron.sh"]
