@@ -329,7 +329,7 @@ module.exports = {
 
 // Script d'initialisation pour générer une clé
 if (require.main === module) {
-    console.log('Génération d'une nouvelle clé de chiffrement...');
+    console.log('Génération d\'une nouvelle clé de chiffrement...');
     console.log('Ajoutez cette ligne à votre fichier .env :');
     console.log(`ENCRYPTION_MASTER_KEY=${CredentialEncryption.generateKey()}`);
 }

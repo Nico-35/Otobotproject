@@ -15,7 +15,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Installer les dépendances
-RUN npm ci --only=production
+RUN npm ci --only=production || npm install --production
 
 # Copier le code de l'application
 COPY . .
@@ -33,5 +33,5 @@ USER nodejs
 # Exposer le port
 EXPOSE 3001
 
-# Commande de démarrage
-CMD ["node", "api-internal.js"]
+# Commande de démarrage - IMPORTANT : utilisez le bon fichier
+CMD ["node", "api-internal-n8n.js"]

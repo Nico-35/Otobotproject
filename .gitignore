@@ -23,4 +23,4 @@ __pycache__/
 .vscode/
 .idea/
 
-Otobot.code-workspace
+*.code-workspace

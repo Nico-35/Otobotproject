@@ -1,76 +1,202 @@
 services:
   # --- Service PostgreSQL ---
   postgres:
-    image: postgres:15 # Version recommandée de PostgreSQL
+    image: postgres:15
     restart: unless-stopped
-    container_name: otobot_postgres_db # Nom du conteneur spécifique au projet
+    container_name: otobot_postgres_db
     environment:
-      POSTGRES_DB: otobot_n8n # Nom de la base de données spécifique au projet pour n8n
-      POSTGRES_USER: otobot_n8n # Nom d'utilisateur spécifique au projet pour n8n
-      POSTGRES_PASSWORD: 43Z%DzumBWb8#hm#JE%K # << IMPORTANT: Définis un mot de passe fort ici
-      # POSTGRES_NON_ROOT_USER: your_other_user # Optionnel: pour un autre utilisateur, si besoin
-      # POSTGRES_NON_ROOT_PASSWORD: your_other_password # Optionnel: pour un autre utilisateur, si besoin
+      # Les mots de passe sont maintenant dans le fichier .env
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - ~/Docker_Volumes/postgres_data:/var/lib/postgresql/data # Persistance des données de la DB
+      - postgres_data:/var/lib/postgresql/data
+      # Montage du script d'initialisation
+      - ./sql/init-databases.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
-      - otobot_backend_network # Connexion au réseau interne du projet
+      - otobot_backend_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # --- Service N8N ---
   n8n:
-    image: n8nio/n8n # Nouveau nom d'image officiel
+    image: n8nio/n8n:1.41.1
     restart: unless-stopped
-    container_name: otobot_n8n # Nom du conteneur spécifique au projet
+    container_name: otobot_n8n
     ports:
-      - "5678:5678" # Mappe le port 5678 du conteneur au port 5678 du VPS
+      - "${N8N_PORT:-5678}:5678"
     volumes:
-      - ~/Docker_Volumes/n8n_data:/home/node/.n8n # Persistance des données de n8n
+      - n8n_data:/home/node/.n8n
+      # Montage du dossier custom pour les nodes personnalisés
+      - ./n8n-custom:/home/node/.n8n/custom
     environment:
-      # --- Paramètres N8N ---
-      - N8N_HOST=37.59.105.73 # Remplace par l'IP de ton VPS (ou ton nom de domaine si tu en utilises un plus tard)
-      - WEBHOOK_URL=http://37.59.105.73:5678/ # URL pour les webhooks
+      - N8N_HOST=${N8N_HOST}
+      - WEBHOOK_URL=${WEBHOOK_URL}
       - N8N_PORT=5678
-      - N8N_PROTOCOL=http # Si tu n'utilises pas HTTPS (recommandé plus tard avec un reverse proxy)
-      - TZ=Europe/Paris # Définis ton fuseau horaire
-      - N8N_SECURE_COOKIE=false # Paramètre temporaire, a supprimer pour la Production. Nécessaire car pas encore possible d'activer la connexion HTTPS, car nécessite de pluger le nom de domaine sur l'IP. A faire en urgence pour sécuriser le serveur
-
-      # --- Paramètres de base de données (Connexion à PostgreSQL) ---
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-https}
+      - TZ=${TZ:-Europe/Paris}
+      - N8N_SECURE_COOKIE=${N8N_SECURE_COOKIE:-true}
+      # Configuration base de données
       - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=otobot_postgres_db # Nom du service PostgreSQL dans le même docker-compose
+      - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=otobot_n8n # Nom de la base de données défini pour PostgreSQL
-      - DB_POSTGRESDB_USER=otobot_n8n # Nom d'utilisateur défini pour PostgreSQL
-      - DB_POSTGRESDB_PASSWORD=43Z%DzumBWb8#hm#JE%K # << IMPORTANT: Le même que ci-dessus
-
-      # --- Paramètres de gestion des utilisateurs (première configuration) ---
-      # À ENLEVER/COMMENTER APRÈS LA PREMIÈRE CONNEXION ET CRÉATION DE COMPTE !
-      # - N8N_USER_MANAGEMENT_ENABLED=true
-      # - N8N_USERS_ALLOW_SIGNUP=true
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      # Gestion des utilisateurs
+      - N8N_USER_MANAGEMENT_ENABLED=${N8N_USER_MANAGEMENT_ENABLED:-true}
+      - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_JWT_SECRET}
     networks:
-      - otobot_backend_network # Connexion au réseau interne du projet
+      - otobot_backend_network
+    depends_on:
+      postgres:
+        condition: service_healthy
 
+  # --- Service API Interne ---
+  api-internal:
+    build: 
+      context: ./api-internal
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    container_name: otobot_api_internal
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - FRONTEND_DB_HOST=postgres
+      - FRONTEND_DB_NAME=${FRONTEND_DB_NAME}
+      - FRONTEND_DB_USER=${FRONTEND_DB_USER}
+      - FRONTEND_DB_PASSWORD=${FRONTEND_DB_PASSWORD}
+      - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY}
+      - N8N_INTERNAL_TOKEN=${N8N_INTERNAL_TOKEN}
+      - INTERNAL_API_PORT=3001
+      - JWT_SECRET=${API_JWT_SECRET}
+    volumes:
+      - ./api-internal:/app
+      - /app/node_modules
+    networks:
+      - otobot_backend_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["api"]
 
-  # --- Service pgAdmin ---
+  # --- Service Token Refresher ---
+  token-refresher:
+    build:
+      context: ./api-internal
+      dockerfile: Dockerfile.cron
+    restart: unless-stopped
+    container_name: otobot_token_refresher
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - INTERNAL_API_URL=http://api-internal:3001
+      - N8N_INTERNAL_TOKEN=${N8N_INTERNAL_TOKEN}
+    networks:
+      - otobot_backend_network
+    depends_on:
+      - api-internal
+    profiles: ["api"]
+
+  # --- Service ToolJet ---
+  tooljet:
+    image: tooljet/tooljet-ce:latest
+    restart: unless-stopped
+    container_name: otobot_tooljet
+    ports:
+      - "${TOOLJET_PORT:-8082}:8082"
+    environment:
+      # Configuration base de données ToolJet
+      - TOOLJET_DB=${TOOLJET_DB}
+      - TOOLJET_DB_USER=${TOOLJET_DB_USER}
+      - TOOLJET_DB_PASS=${TOOLJET_DB_PASS}
+      - TOOLJET_DB_HOST=postgres
+      - TOOLJET_DB_PORT=5432
+      - PG_DB=${TOOLJET_DB}
+      - PG_USER=${TOOLJET_DB_USER}
+      - PG_PASSWORD=${TOOLJET_DB_PASS}
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      # Configuration ToolJet
+      - TOOLJET_HOST=${TOOLJET_HOST}
+      - TOOLJET_SERVER_URL=${TOOLJET_SERVER_URL}
+      - SECRET_KEY_BASE=${TOOLJET_SECRET_KEY_BASE}
+      - ENCRYPTION_KEY=${TOOLJET_ENCRYPTION_KEY}
+      - JWT_SECRET=${TOOLJET_JWT_SECRET}
+      # Configuration email (optionnel)
+      - DEFAULT_FROM_EMAIL=${DEFAULT_FROM_EMAIL:-noreply@otobot.fr}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_DOMAIN=${SMTP_DOMAIN}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      # Autres configurations
+      - NODE_ENV=${NODE_ENV:-production}
+      - DEPLOYMENT_PLATFORM=docker
+      - CHECK_FOR_UPDATES=${CHECK_FOR_UPDATES:-false}
+      - DISABLE_SIGNUPS=${DISABLE_SIGNUPS:-false}
+    volumes:
+      - tooljet_data:/app/data
+    networks:
+      - otobot_backend_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["frontend"]
+
+  # --- Service pgAdmin (optionnel, pour le développement) ---
   pgadmin:
-    image: dpage/pgadmin4:latest # Image officielle de pgAdmin
+    image: dpage/pgadmin4:latest
     container_name: otobot_pgadmin
     restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: nicolas.zaug@gmail.com # Email pour vous connecter à pgAdmin
-      PGADMIN_DEFAULT_PASSWORD: Lootre99 # Mot de passe FORT pour pgAdmin
-      PGADMIN_LISTEN_PORT: 80 # Port interne de pgAdmin, sera mappé ci-dessous
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+      PGADMIN_LISTEN_PORT: 80
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
     ports:
-      - "5050:80" # Mappe le port 80 de pgAdmin au port 5050 du VPS (vous pouvez choisir un autre port VPS)
+      - "${PGADMIN_PORT:-5050}:80"
     volumes:
-      - ~/Docker_Volumes/pgadmin_data:/var/lib/pgadmin # Persistance des données et configurations de pgAdmin
+      - pgadmin_data:/var/lib/pgadmin
     networks:
-      - otobot_backend_network # Connexion au réseau interne commun
-    depends_on: # S'assure que PostgreSQL démarre avant pgAdmin
+      - otobot_backend_network
+    depends_on:
       - postgres
+    profiles: ["dev"]
 
+  # --- Service Nginx Reverse Proxy (recommandé pour la production) ---
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    container_name: otobot_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    networks:
+      - otobot_backend_network
+    depends_on:
+      - n8n
+      - tooljet
+      - api-internal
+    profiles: ["production"]
 
+# --- Volumes Docker ---
+volumes:
+  postgres_data:
+  n8n_data:
+  tooljet_data:
+  pgadmin_data:
+  nginx_logs:
 
-
-# --- Définition des réseaux Docker ---
+# --- Réseaux Docker ---
 networks:
-  otobot_backend_network: # Nom du réseau qui connecte les services (spécifique au projet)
-    driver: bridge # Type de réseau par défaut, suffisant ici
+  otobot_backend_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

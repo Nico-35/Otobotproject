@@ -2,10 +2,10 @@
   "name": "otobot-api-internal",
   "version": "1.0.0",
   "description": "API interne pour la gestion sécurisée des credentials clients",
-  "main": "api-internal.js",
+  "main": "api-internal-n8n.js",
   "scripts": {
-    "start": "node api-internal.js",
-    "dev": "nodemon api-internal.js",
+    "start": "node api-internal-n8n.js",
+    "dev": "nodemon api-internal-n8n.js",
     "test": "jest",
     "generate-key": "node encryption.js"
   },
@@ -19,7 +19,10 @@
     "dotenv": "^16.3.1",
     "helmet": "^7.1.0",
     "cors": "^2.8.5",
-    "express-rate-limit": "^7.1.0"
+    "express-rate-limit": "^7.1.0",
+    "bcrypt": "^5.1.1",
+    "uuid": "^9.0.1",
+    "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1",

@@ -338,6 +338,10 @@ app.use((err, req, res, next) => {
 
 // Démarrage du serveur
 const PORT = process.env.INTERNAL_API_PORT || 3001;
+// Intégration des endpoints ToolJet
+const createToolJetEndpoints = require('./api-tooljet-endpoints');
+const tooljetRouter = createToolJetEndpoints(pool, encryption, credentialManager);
+app.use('/api/tooljet', tooljetRouter);
 app.listen(PORT, () => {
     console.log(`API Interne démarrée sur le port ${PORT}`);
     console.log(`Environnement: ${process.env.NODE_ENV || 'development'}`);
