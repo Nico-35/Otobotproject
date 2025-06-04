@@ -8,6 +8,9 @@ CREATE TABLE clients (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) UNIQUE NOT NULL,
     company_name VARCHAR(255),
+    password_hash VARCHAR(255),
+    is_active BOOLEAN DEFAULT true,
+    last_login_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

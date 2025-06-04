@@ -17,6 +17,16 @@ CREATE DATABASE otobot_tooljet;
 CREATE USER tooljet_user WITH ENCRYPTED PASSWORD 'TOOLJET_DB_PASS_PLACEHOLDER';
 GRANT ALL PRIVILEGES ON DATABASE otobot_tooljet TO tooljet_user;
 
+-- Permissions supplémentaires pour tooljet_user
+ALTER USER tooljet_user CREATEDB;
+
+-- Permissions sur le schéma public
+\c otobot_tooljet
+GRANT ALL PRIVILEGES ON SCHEMA public TO tooljet_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO tooljet_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO tooljet_user;
+GRANT CREATE ON SCHEMA public TO tooljet_user;
+
 -- Extension pgcrypto pour le chiffrement
 \c otobot_frontend
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -55,7 +65,7 @@ CREATE TABLE IF NOT EXISTS client_subscriptions (
     service_code VARCHAR(50) NOT NULL,
     service_name VARCHAR(255) NOT NULL,
     description TEXT,
-    config JSONB, -- Configuration spécifique du service
+    config JSONB,
     is_active BOOLEAN DEFAULT true,
     subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP,

@@ -62,6 +62,8 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     container_name: otobot_api_internal
+    ports:
+      - "3001:3001" 
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       - FRONTEND_DB_HOST=postgres
@@ -71,7 +73,7 @@ services:
       - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY}
       - N8N_INTERNAL_TOKEN=${N8N_INTERNAL_TOKEN}
       - INTERNAL_API_PORT=3001
-      - JWT_SECRET=${API_JWT_SECRET}
+      - API_JWT_SECRET=${API_JWT_SECRET}
     volumes:
       - ./api-internal:/app
       - /app/node_modules
@@ -101,11 +103,13 @@ services:
 
   # --- Service ToolJet ---
   tooljet:
-    image: tooljet/tooljet-ce:latest
+    image: tooljet/tooljet-ce:v2.33.0
     restart: unless-stopped
     container_name: otobot_tooljet
     ports:
       - "${TOOLJET_PORT:-8082}:8082"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["cd /app && PORT=8082 npm run start:prod"]
     environment:
       # Configuration base de données ToolJet
       - TOOLJET_DB=${TOOLJET_DB}
@@ -120,7 +124,9 @@ services:
       - PG_PORT=5432
       # Configuration ToolJet
       - TOOLJET_HOST=${TOOLJET_HOST}
-      - TOOLJET_SERVER_URL=${TOOLJET_SERVER_URL}
+      #- TOOLJET_SERVER_URL=${TOOLJET_SERVER_URL}
+      - TOOLJET_SERVER_URL=http://localhost:8082
+      - PORT=8082
       - SECRET_KEY_BASE=${TOOLJET_SECRET_KEY_BASE}
       - ENCRYPTION_KEY=${TOOLJET_ENCRYPTION_KEY}
       - JWT_SECRET=${TOOLJET_JWT_SECRET}
@@ -131,10 +137,13 @@ services:
       - SMTP_DOMAIN=${SMTP_DOMAIN}
       - SMTP_PORT=${SMTP_PORT:-587}
       # Autres configurations
-      - NODE_ENV=${NODE_ENV:-production}
+      #- NODE_ENV=${NODE_ENV:-production}
+      - NODE_ENV=development
       - DEPLOYMENT_PLATFORM=docker
       - CHECK_FOR_UPDATES=${CHECK_FOR_UPDATES:-false}
       - DISABLE_SIGNUPS=${DISABLE_SIGNUPS:-false}
+    env_file:
+      - ./tooljet.env
     volumes:
       - tooljet_data:/app/data
     networks:

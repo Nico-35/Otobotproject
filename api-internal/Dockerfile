@@ -1,12 +1,13 @@
 # Dockerfile pour l'API Interne
-FROM node:18-alpine
+FROM node:18-slim
 
 # Installer les dépendances système nécessaires
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y \
     python3 \
     make \
     g++ \
-    postgresql-client
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
 
 # Créer le répertoire de l'application
 WORKDIR /app
@@ -20,18 +21,8 @@ RUN npm ci --only=production || npm install --production
 # Copier le code de l'application
 COPY . .
 
-# Créer un utilisateur non-root pour l'exécution
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
-# Changer le propriétaire des fichiers
-RUN chown -R nodejs:nodejs /app
-
-# Utiliser l'utilisateur non-root
-USER nodejs
-
 # Exposer le port
 EXPOSE 3001
 
-# Commande de démarrage - IMPORTANT : utilisez le bon fichier
+# Commande de démarrage
 CMD ["node", "api-internal-n8n.js"]

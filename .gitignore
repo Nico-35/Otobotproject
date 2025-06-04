@@ -24,3 +24,6 @@ __pycache__/
 .idea/
 
 *.code-workspace
+tooljet.env
+api-internal/package-lock.json
+api-internal/package-lock.json
