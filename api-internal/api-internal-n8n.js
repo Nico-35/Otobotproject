@@ -1,4 +1,4 @@
-// api-internal.js - API sécurisée pour N8N
+// api-internal-updated.js - API avec intégration OAuth sécurisée
 const express = require('express');
 const { Pool } = require('pg');
 const { CredentialEncryption, CredentialManager } = require('./encryption');
@@ -58,14 +58,17 @@ app.get('/health', (req, res) => {
 
 /**
  * Récupère les credentials d'un client pour un service
- * GET /api/internal/credentials/:clientId/:serviceName
+ * Modifié pour supporter le multi-utilisateurs
+ * GET /api/internal/credentials/:userId/:serviceName
  */
-app.get('/api/internal/credentials/:clientId/:serviceName', authenticateN8N, async (req, res) => {
+app.get('/api/internal/credentials/:userId/:serviceName', authenticateN8N, async (req, res) => {
     try {
-        const { clientId, serviceName } = req.params;
-        const ipAddress = req.ip;
+        const { userId, serviceName } = req.params;
         
-        // Récupération de l'ID du service
+        // Utiliser la nouvelle fonction qui gère les utilisateurs
+        const query = 'SELECT * FROM get_user_decrypted_connection($1, $2, $3, $4)';
+        
+        // Récupérer l'ID du service
         const serviceQuery = 'SELECT id FROM services WHERE name = $1 AND is_active = true';
         const serviceResult = await pool.query(serviceQuery, [serviceName]);
         
@@ -78,32 +81,38 @@ app.get('/api/internal/credentials/:clientId/:serviceName', authenticateN8N, asy
         
         const serviceId = serviceResult.rows[0].id;
         
-        // Récupération de la connexion
-        const connection = await credentialManager.getConnection(clientId, serviceId);
+        // Récupérer la connexion de l'utilisateur
+        const result = await pool.query(query, [
+            userId,
+            serviceId,
+            process.env.ENCRYPTION_MASTER_KEY,
+            'n8n'
+        ]);
         
-        if (!connection) {
+        if (result.rows.length === 0) {
             return res.status(404).json({ 
                 error: 'Connection not found',
-                message: 'Aucune connexion active trouvée pour ce client et ce service'
+                message: 'Aucune connexion active trouvée pour cet utilisateur et ce service'
             });
         }
         
+        const connection = result.rows[0];
+        
         // Vérification de l'expiration du token
-        const tokenExpired = connection.tokenExpiresAt && new Date(connection.tokenExpiresAt) < new Date();
+        const tokenExpired = connection.token_expires_at && new Date(connection.token_expires_at) < new Date();
         
         // Réponse avec les données nécessaires
         res.json({
-            connectionId: connection.id,
+            connectionId: connection.connection_id,
             credentials: {
-                accessToken: connection.accessToken,
-                apiKey: connection.apiKey,
-                // Ne pas renvoyer le refresh token à N8N
+                accessToken: connection.access_token,
+                apiKey: connection.api_key,
             },
             metadata: {
-                accountIdentifier: connection.accountIdentifier,
+                accountIdentifier: connection.account_identifier,
                 scopes: connection.scopes,
                 tokenExpired: tokenExpired,
-                tokenExpiresAt: connection.tokenExpiresAt
+                tokenExpiresAt: connection.token_expires_at
             }
         });
         
@@ -117,12 +126,12 @@ app.get('/api/internal/credentials/:clientId/:serviceName', authenticateN8N, asy
 });
 
 /**
- * Liste toutes les connexions disponibles pour un client
- * GET /api/internal/connections/:clientId
+ * Liste toutes les connexions disponibles pour un utilisateur
+ * GET /api/internal/connections/:userId
  */
-app.get('/api/internal/connections/:clientId', authenticateN8N, async (req, res) => {
+app.get('/api/internal/connections/:userId', authenticateN8N, async (req, res) => {
     try {
-        const { clientId } = req.params;
+        const { userId } = req.params;
         
         const query = `
             SELECT 
@@ -141,14 +150,14 @@ app.get('/api/internal/connections/:clientId', authenticateN8N, async (req, res)
                 END as status
             FROM client_connections cc
             JOIN services s ON cc.service_id = s.id
-            WHERE cc.client_id = $1 AND cc.is_active = true
+            WHERE cc.user_id = $1 AND cc.is_active = true
             ORDER BY s.display_name, cc.created_at DESC
         `;
         
-        const result = await pool.query(query, [clientId]);
+        const result = await pool.query(query, [userId]);
         
         res.json({
-            clientId: clientId,
+            userId: userId,
             connections: result.rows
         });
         
@@ -227,7 +236,7 @@ app.post('/api/internal/refresh-tokens', authenticateN8N, async (req, res) => {
         const query = `
             SELECT 
                 cc.id,
-                cc.client_id,
+                cc.user_id,
                 cc.service_id,
                 s.name as service_name,
                 s.oauth_token_url
@@ -246,19 +255,24 @@ app.post('/api/internal/refresh-tokens', authenticateN8N, async (req, res) => {
         for (const conn of expiredConnections.rows) {
             try {
                 // Récupérer la connexion complète avec les tokens déchiffrés
-                const connection = await credentialManager.getConnection(
-                    conn.client_id, 
-                    conn.service_id
-                );
+                const connectionQuery = 'SELECT * FROM get_user_decrypted_connection($1, $2, $3, $4)';
+                const connectionResult = await pool.query(connectionQuery, [
+                    conn.user_id,
+                    conn.service_id,
+                    process.env.ENCRYPTION_MASTER_KEY,
+                    'system'
+                ]);
                 
-                if (!connection || !connection.refreshToken) {
+                if (connectionResult.rows.length === 0 || !connectionResult.rows[0].refresh_token) {
                     continue;
                 }
+                
+                const connection = connectionResult.rows[0];
                 
                 // Appeler la fonction de refresh spécifique au service
                 const refreshResult = await refreshServiceToken(
                     conn.service_name,
-                    connection.refreshToken,
+                    connection.refresh_token,
                     conn.oauth_token_url
                 );
                 
@@ -308,24 +322,30 @@ app.post('/api/internal/refresh-tokens', authenticateN8N, async (req, res) => {
 // Fonction helper pour le refresh des tokens selon le service
 async function refreshServiceToken(serviceName, refreshToken, tokenUrl) {
     // Cette fonction devrait être étendue pour chaque service
-    // Exemple générique OAuth2
-    const axios = require('axios');
-    
-    const params = new URLSearchParams();
-    params.append('grant_type', 'refresh_token');
-    params.append('refresh_token', refreshToken);
-    
-    // Vous devrez ajouter client_id et client_secret selon le service
-    // Ces valeurs devraient être stockées de manière sécurisée
-    
-    const response = await axios.post(tokenUrl, params, {
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
-    });
-    
-    return response.data;
+    // Pour l'instant, on retourne une erreur
+    throw new Error(`Refresh non implémenté pour ${serviceName}`);
 }
+
+// ======================
+// INTÉGRATION DES ROUTES OAUTH
+// ======================
+const { createSecureOAuthRoutes } = require('./api-oauth-secure');
+const oauthRouter = createSecureOAuthRoutes(pool, encryption);
+app.use('/api/oauth', oauthRouter);
+
+// ======================
+// INTÉGRATION DES ROUTES TOOLJET
+// ======================
+const createToolJetEndpoints = require('./api-tooljet-endpoints');
+const tooljetRouter = createToolJetEndpoints(pool, encryption, credentialManager);
+app.use('/api/tooljet', tooljetRouter);
+
+// ======================
+// INTÉGRATION DE L'AUTHENTIFICATION UTILISATEUR
+// ======================
+// const { createUserAuthRoutes } = require('./api-user-auth');
+// const userAuthRouter = createUserAuthRoutes(pool);
+// app.use('/api/auth', userAuthRouter);
 
 // Gestion des erreurs globales
 app.use((err, req, res, next) => {
@@ -338,11 +358,13 @@ app.use((err, req, res, next) => {
 
 // Démarrage du serveur
 const PORT = process.env.INTERNAL_API_PORT || 3001;
-// Intégration des endpoints ToolJet
-const createToolJetEndpoints = require('./api-tooljet-endpoints');
-const tooljetRouter = createToolJetEndpoints(pool, encryption, credentialManager);
-app.use('/api/tooljet', tooljetRouter);
 app.listen(PORT, () => {
     console.log(`API Interne démarrée sur le port ${PORT}`);
     console.log(`Environnement: ${process.env.NODE_ENV || 'development'}`);
+    console.log('Routes disponibles:');
+    console.log('  - /health');
+    console.log('  - /api/internal/* (N8N)');
+    console.log('  - /api/oauth/* (OAuth)');
+    console.log('  - /api/tooljet/* (ToolJet)');
+    console.log('  - /api/auth/* (Auth utilisateurs)');
 });

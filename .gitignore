@@ -27,3 +27,15 @@ __pycache__/
 tooljet.env
 api-internal/package-lock.json
 api-internal/package-lock.json
+tooljet.env.backup
+
+# Fichiers de backup
+*.backup
+
+# Fichiers secrets
+secrets-*.txt
+*CONFIDENTIEL*
+
+# Fichiers temporaires
+api-oauth-secure-patch.js
+insert-oauth*.js

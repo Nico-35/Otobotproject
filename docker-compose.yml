@@ -9,6 +9,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Montage du script d'initialisation
@@ -65,6 +66,8 @@ services:
     ports:
       - "3001:3001" 
     environment:
+      - TZ=Europe/Paris
+      - TOOLJET_URL=http://127.0.0.1:8082
       - NODE_ENV=${NODE_ENV:-production}
       - FRONTEND_DB_HOST=postgres
       - FRONTEND_DB_NAME=${FRONTEND_DB_NAME}
@@ -125,11 +128,12 @@ services:
       # Configuration ToolJet
       - TOOLJET_HOST=${TOOLJET_HOST}
       #- TOOLJET_SERVER_URL=${TOOLJET_SERVER_URL}
-      - TOOLJET_SERVER_URL=http://localhost:8082
+      - TOOLJET_SERVER_URL=http://127.0.0.1:8082
       - PORT=8082
       - SECRET_KEY_BASE=${TOOLJET_SECRET_KEY_BASE}
       - ENCRYPTION_KEY=${TOOLJET_ENCRYPTION_KEY}
       - JWT_SECRET=${TOOLJET_JWT_SECRET}
+      - LOCKBOX_MASTER_KEY=${LOCKBOX_MASTER_KEY}
       # Configuration email (optionnel)
       - DEFAULT_FROM_EMAIL=${DEFAULT_FROM_EMAIL:-noreply@otobot.fr}
       - SMTP_USERNAME=${SMTP_USERNAME}

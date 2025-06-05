@@ -1,6 +1,10 @@
 # Dockerfile pour l'API Interne
 FROM node:18-slim
 
+# Définir le timezone
+ENV TZ=Europe/Paris
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
 # Installer les dépendances système nécessaires
 RUN apt-get update && apt-get install -y \
     python3 \
