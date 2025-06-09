@@ -347,6 +347,211 @@ app.use('/api/tooljet', tooljetRouter);
 // const userAuthRouter = createUserAuthRoutes(pool);
 // app.use('/api/auth', userAuthRouter);
 
+
+// Ajouter ces routes dans api-internal-n8n.js après les routes existantes
+
+
+
+/**
+ * Liste toutes les connexions d'un utilisateur
+ * GET /api/internal/user/:userId/connections
+ */
+app.get('/api/internal/user/:userId/connections', authenticateN8N, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        // Validation de l'UUID
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(userId)) {
+            return res.status(400).json({ 
+                error: 'Bad Request',
+                message: 'User ID invalide'
+            });
+        }
+        
+        const query = `
+            SELECT 
+                cc.id,
+                s.name as service_name,
+                s.display_name as service_display_name,
+                cc.connection_name,
+                cc.account_identifier,
+                cc.token_expires_at,
+                cc.last_used_at,
+                CASE 
+                    WHEN cc.token_expires_at IS NULL THEN 'valid'
+                    WHEN cc.token_expires_at > NOW() THEN 'valid'
+                    WHEN cc.encrypted_refresh_token IS NOT NULL THEN 'refresh_needed'
+                    ELSE 'expired'
+                END as status
+            FROM client_connections cc
+            JOIN services s ON cc.service_id = s.id
+            JOIN users u ON cc.user_id = u.id
+            WHERE cc.user_id = $1 
+              AND cc.is_active = true
+              AND u.is_active = true
+            ORDER BY s.display_name, cc.created_at DESC
+        `;
+        
+        const result = await pool.query(query, [userId]);
+        
+        res.json({
+            userId: userId,
+            connections: result.rows
+        });
+        
+    } catch (error) {
+        console.error('[API] Erreur lors de la liste des connexions utilisateur:', error);
+        res.status(500).json({ 
+            error: 'Internal server error',
+            message: 'Une erreur est survenue lors de la récupération des connexions'
+        });
+    }
+});
+
+/**
+ * Récupère les credentials d'un utilisateur pour un service
+ * GET /api/internal/user/:userId/credentials/:serviceName
+ */
+app.get('/api/internal/user/:userId/credentials/:serviceName', authenticateN8N, async (req, res) => {
+    try {
+        const { userId, serviceName } = req.params;
+        
+        console.log(`[API] Récupération credentials - User: ${userId}, Service: ${serviceName}`);
+        
+        // Validation de l'UUID utilisateur
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(userId)) {
+            return res.status(400).json({ 
+                error: 'Bad Request',
+                message: 'User ID invalide'
+            });
+        }
+        
+        // Récupération de l'ID du service
+        const serviceQuery = 'SELECT id FROM services WHERE name = $1 AND is_active = true';
+        const serviceResult = await pool.query(serviceQuery, [serviceName]);
+        
+        if (serviceResult.rows.length === 0) {
+            return res.status(404).json({ 
+                error: 'Service not found',
+                message: `Le service ${serviceName} n'existe pas ou n'est pas actif`
+            });
+        }
+        
+        const serviceId = serviceResult.rows[0].id;
+        
+        // Récupération de la connexion pour l'utilisateur spécifique
+// Utiliser la fonction PostgreSQL pour récupérer et déchiffrer
+        const query = `
+            SELECT * FROM get_user_credentials($1, $2, $3)
+        `;
+        
+        const result = await pool.query(query, [
+            userId, 
+            serviceName, 
+            process.env.ENCRYPTION_MASTER_KEY
+        ]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ 
+                error: 'Connection not found',
+                message: 'Aucune connexion active trouvée pour cet utilisateur et ce service'
+            });
+        }
+        
+        const connection = result.rows[0];
+        
+        // Vérification de l'expiration du token
+        const tokenExpired = connection.token_expires_at && new Date(connection.token_expires_at) < new Date();
+        
+        // Pour Notion, on retourne le token dans le format attendu
+        const credentials = serviceName === 'notion' 
+            ? { apiKey: connection.api_key || connection.access_token }
+            : { accessToken: connection.access_token, apiKey: connection.api_key };
+        
+        // Réponse avec les données nécessaires
+        res.json({
+            connectionId: connection.id,
+            credentials: credentials,
+            metadata: {
+                connectionName: connection.connection_name,
+                accountIdentifier: connection.account_identifier,
+                scopes: connection.scopes,
+                tokenExpired: tokenExpired,
+                tokenExpiresAt: connection.token_expires_at
+            }
+        });
+        
+        console.log(`[API] Credentials récupérés avec succès pour ${userId}/${serviceName}`);
+        
+    } catch (error) {
+        console.error('[API] Erreur lors de la récupération des credentials utilisateur:', error);
+        res.status(500).json({ 
+            error: 'Internal server error',
+            message: 'Une erreur est survenue lors de la récupération des credentials'
+        });
+    }
+});
+
+/**
+ * Liste toutes les connexions d'un utilisateur
+ * GET /api/internal/user/:userId/connections
+ */
+app.get('/api/internal/user/:userId/connections', authenticateN8N, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        // Validation de l'UUID
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(userId)) {
+            return res.status(400).json({ 
+                error: 'Bad Request',
+                message: 'User ID invalide'
+            });
+        }
+        
+        const query = `
+            SELECT 
+                cc.id,
+                s.name as service_name,
+                s.display_name as service_display_name,
+                cc.connection_name,
+                cc.account_identifier,
+                cc.token_expires_at,
+                cc.last_used_at,
+                CASE 
+                    WHEN cc.token_expires_at IS NULL THEN 'valid'
+                    WHEN cc.token_expires_at > NOW() THEN 'valid'
+                    WHEN cc.encrypted_refresh_token IS NOT NULL THEN 'refresh_needed'
+                    ELSE 'expired'
+                END as status
+            FROM client_connections cc
+            JOIN services s ON cc.service_id = s.id
+            JOIN users u ON cc.user_id = u.id
+            WHERE cc.user_id = $1 
+              AND cc.is_active = true
+              AND u.is_active = true
+            ORDER BY s.display_name, cc.created_at DESC
+        `;
+        
+        const result = await pool.query(query, [userId]);
+        
+        res.json({
+            userId: userId,
+            connections: result.rows
+        });
+        
+    } catch (error) {
+        console.error('[API] Erreur lors de la liste des connexions utilisateur:', error);
+        res.status(500).json({ 
+            error: 'Internal server error',
+            message: 'Une erreur est survenue lors de la récupération des connexions'
+        });
+    }
+});
+
+
 // Gestion des erreurs globales
 app.use((err, req, res, next) => {
     console.error('Erreur non gérée:', err);
