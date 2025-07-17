@@ -105,7 +105,7 @@ class SecureOAuthManager {
         this.oauthStates.set(state, {
             userId,
             serviceName,
-            returnUrl,
+            returnUrl: returnUrl || process.env.TOOLJET_DEFAULT_RETURN_URL || '/connections',
             oauthAppId: config.appId, // Stocker l'ID de l'app OAuth utilisée
             createdAt: new Date(),
             expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
@@ -623,10 +623,21 @@ function createSecureOAuthRoutes(pool, encryption) {
             const result = await oauthManager.handleOAuthCallback(service, code, state);
             
             // Rediriger vers ToolJet avec succès
-            const baseUrl = result.returnUrl.startsWith('http') ? '' : process.env.TOOLJET_URL;
-            const successUrl = `${baseUrl}${result.returnUrl}?success=true&service=${service}&account=${encodeURIComponent(result.accountInfo.email || '')}`;
- 
-            res.redirect(successUrl);
+            const tooljetUrl = process.env.TOOLJET_SERVER_URL || process.env.TOOLJET_URL || 'http://localhost:8082';
+
+            let successUrl;
+            if (result.returnUrl.startsWith('http')) {
+                successUrl = result.returnUrl;
+            } else {
+                successUrl = `${tooljetUrl}${result.returnUrl}`;
+            }
+
+            const urlObj = new URL(successUrl);
+            urlObj.searchParams.set('success', 'true');
+            urlObj.searchParams.set('service', service);
+            urlObj.searchParams.set('account', encodeURIComponent(result.accountInfo.email || ''));
+
+            res.redirect(urlObj.toString());
             
         } catch (error) {
             console.error('Erreur callback OAuth:', error);

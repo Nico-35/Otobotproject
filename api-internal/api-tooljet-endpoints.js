@@ -12,36 +12,112 @@ function createToolJetEndpoints(pool, encryption, credentialManager) {
     const authModule = new ToolJetAuthModule(pool, process.env.API_JWT_SECRET);
     
     // Middleware d'authentification pour ToolJet
-    const authenticateToolJet = async (req, res, next) => {
-        try {
-            const authHeader = req.headers.authorization;
+// Modification pour api-tooljet-endpoints.js
+// Remplacer le middleware authenticateToolJet existant par cette version flexible
+
+// Middleware d'authentification flexible pour ToolJet
+const authenticateToolJet = async (req, res, next) => {
+    try {
+        // Option 1 : Token JWT Bearer (pour les vrais utilisateurs)
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            const token = authHeader.substring(7);
+            try {
+                const decoded = authModule.verifyJWT(token);
+                
+                // Récupérer l'ID de l'utilisateur depuis le token ou la base
+                let userId = decoded.userId; // Si le JWT contient userId
+                
+                if (!userId && decoded.clientId) {
+                    // Si pas de userId dans le token, récupérer depuis la base
+                    const userQuery = `
+                        SELECT id FROM users 
+                        WHERE client_id = $1 AND email = $2 
+                        LIMIT 1
+                    `;
+                    const userResult = await pool.query(userQuery, [decoded.clientId, decoded.email]);
+                    
+                    if (userResult.rows.length > 0) {
+                        userId = userResult.rows[0].id;
+                    }
+                }
+                
+                // Ajouter les infos à la requête
+                req.client = {
+                    id: decoded.clientId,
+                    email: decoded.email,
+                    companyName: decoded.companyName
+                };
+                
+                req.user = {
+                    id: userId,
+                    email: decoded.email
+                };
+                
+                return next();
+            } catch (jwtError) {
+                // JWT invalide, essayer l'autre méthode
+            }
+        }
+        
+        // Option 2 : x-internal-token (pour compatibilité)
+        const internalToken = req.headers['x-internal-token'];
+        if (internalToken && internalToken === process.env.N8N_INTERNAL_TOKEN) {
+            // Pour le token interne, on doit récupérer userId depuis la query
+            const userId = req.query.userId || req.body.userId;
+            const clientId = req.query.clientId || req.body.clientId;
             
-            if (!authHeader || !authHeader.startsWith('Bearer ')) {
-                return res.status(401).json({
-                    error: 'Unauthorized',
-                    message: 'Token manquant'
+            if (!userId) {
+                return res.status(400).json({
+                    error: 'Bad Request',
+                    message: 'userId requis pour x-internal-token'
                 });
             }
             
-            const token = authHeader.substring(7);
-            const decoded = authModule.verifyJWT(token);
+            // Récupérer les infos depuis la DB
+            const userQuery = `
+                SELECT u.id, u.email, u.client_id, c.email as client_email, c.company_name
+                FROM users u
+                JOIN clients c ON u.client_id = c.id
+                WHERE u.id = $1
+            `;
+            const userResult = await pool.query(userQuery, [userId]);
             
-            // Ajouter les infos client à la requête
-            req.client = {
-                id: decoded.clientId,
-                email: decoded.email,
-                companyName: decoded.companyName
-            };
+            if (userResult.rows.length > 0) {
+                const user = userResult.rows[0];
+                req.client = {
+                    id: user.client_id,
+                    email: user.client_email,
+                    companyName: user.company_name
+                };
+                req.user = {
+                    id: user.id,
+                    email: user.email
+                };
+            } else {
+                return res.status(404).json({
+                    error: 'Not Found',
+                    message: 'Utilisateur introuvable'
+                });
+            }
             
-            next();
-        } catch (error) {
-            return res.status(401).json({
-                error: 'Unauthorized',
-                message: 'Token invalide'
-            });
+            return next();
         }
-    };
-    
+        
+        // Aucune authentification valide trouvée
+        return res.status(401).json({
+            error: 'Unauthorized',
+            message: 'Token manquant ou invalide'
+        });
+        
+    } catch (error) {
+        console.error('Erreur authentification ToolJet:', error);
+        return res.status(401).json({
+            error: 'Unauthorized',
+            message: 'Erreur d\'authentification'
+        });
+    }
+};    
     // ======================
     // ENDPOINTS D'AUTHENTIFICATION
     // ======================
@@ -613,6 +689,248 @@ function createToolJetEndpoints(pool, encryption, credentialManager) {
         authModule.cleanupExpiredSessions();
     }, 60 * 60 * 1000); // Toutes les heures
     
+
+    // ======================
+    // ENDPOINTS CURATION DE CONTENU
+    // ======================
+    
+    /**
+     * GET /api/tooljet/curation-sources
+     * Liste toutes les sources de curation de l'utilisateur
+     */
+    router.get('/curation-sources', authenticateToolJet, async (req, res) => {
+        try {
+            const query = `
+                SELECT 
+                    id,
+                    source_type,
+                    source_value,
+                    source_name,
+                    metadata,
+                    is_active,
+                    last_checked_at,
+                    created_at,
+                    updated_at
+                FROM curation_sources
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+            `;
+            
+            const result = await pool.query(query, [req.client.id]);
+            
+            res.json({
+                success: true,
+                sources: result.rows
+            });
+            
+        } catch (error) {
+            console.error('Erreur liste sources curation:', error);
+            res.status(500).json({
+                error: 'Internal server error',
+                message: 'Erreur lors de la récupération des sources'
+            });
+        }
+    });
+    
+    /**
+     * POST /api/tooljet/curation-sources
+     * Ajoute une nouvelle source de curation
+     */
+    router.post('/curation-sources', authenticateToolJet, async (req, res) => {
+        try {
+            const { source_type, source_value, source_name, metadata } = req.body;
+            
+            // Validation des données
+            if (!source_type || !source_value) {
+                return res.status(400).json({
+                    error: 'Bad Request',
+                    message: 'source_type et source_value sont requis'
+                });
+            }
+            
+            // Validation du type
+            const validTypes = ['WEBSITE', 'RSS_FEED', 'SOCIAL_ACCOUNT', 'BLOG'];
+            if (!validTypes.includes(source_type)) {
+                return res.status(400).json({
+                    error: 'Bad Request',
+                    message: `source_type doit être l'un de: ${validTypes.join(', ')}`
+                });
+            }
+            
+            const query = `
+                INSERT INTO curation_sources 
+                (user_id, source_type, source_value, source_name, metadata)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING *
+            `;
+            
+            const result = await pool.query(query, [
+                req.client.id,
+                source_type,
+                source_value,
+                source_name || null,
+                metadata || {}
+            ]);
+            
+            // Log de l'activité
+            await authModule.logActivity(
+                req.client.id,
+                'add_curation_source',
+                'curation_source',
+                result.rows[0].id,
+                { source_type, source_value },
+                req.ip
+            );
+            
+            res.status(201).json({
+                success: true,
+                source: result.rows[0]
+            });
+            
+        } catch (error) {
+            console.error('Erreur ajout source curation:', error);
+            
+            // Gestion de l'erreur de doublon
+            if (error.code === '23505') {
+                return res.status(409).json({
+                    error: 'Conflict',
+                    message: 'Cette source existe déjà pour cet utilisateur'
+                });
+            }
+            
+            res.status(500).json({
+                error: 'Internal server error',
+                message: 'Erreur lors de l\'ajout de la source'
+            });
+        }
+    });
+    
+    /**
+     * PUT /api/tooljet/curation-sources/:id
+     * Met à jour une source de curation
+     */
+    router.put('/curation-sources/:id', authenticateToolJet, async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { source_value, source_name, metadata, is_active } = req.body;
+            
+            // Construction dynamique de la requête UPDATE
+            const updates = [];
+            const values = [id, req.client.id];
+            let paramIndex = 3;
+            
+            if (source_value !== undefined) {
+                updates.push(`source_value = $${paramIndex++}`);
+                values.push(source_value);
+            }
+            
+            if (source_name !== undefined) {
+                updates.push(`source_name = $${paramIndex++}`);
+                values.push(source_name);
+            }
+            
+            if (metadata !== undefined) {
+                updates.push(`metadata = $${paramIndex++}`);
+                values.push(metadata);
+            }
+            
+            if (is_active !== undefined) {
+                updates.push(`is_active = $${paramIndex++}`);
+                values.push(is_active);
+            }
+            
+            if (updates.length === 0) {
+                return res.status(400).json({
+                    error: 'Bad Request',
+                    message: 'Aucune donnée à mettre à jour'
+                });
+            }
+            
+            const query = `
+                UPDATE curation_sources
+                SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP
+                WHERE id = $1 AND user_id = $2
+                RETURNING *
+            `;
+            
+            const result = await pool.query(query, values);
+            
+            if (result.rows.length === 0) {
+                return res.status(404).json({
+                    error: 'Not found',
+                    message: 'Source introuvable ou non autorisée'
+                });
+            }
+            
+            // Log de l'activité
+            await authModule.logActivity(
+                req.client.id,
+                'update_curation_source',
+                'curation_source',
+                id,
+                { updates: updates.join(', ') },
+                req.ip
+            );
+            
+            res.json({
+                success: true,
+                source: result.rows[0]
+            });
+            
+        } catch (error) {
+            console.error('Erreur mise à jour source curation:', error);
+            res.status(500).json({
+                error: 'Internal server error',
+                message: 'Erreur lors de la mise à jour de la source'
+            });
+        }
+    });
+    
+    /**
+     * DELETE /api/tooljet/curation-sources/:id
+     * Supprime une source de curation
+     */
+    router.delete('/curation-sources/:id', authenticateToolJet, async (req, res) => {
+        try {
+            const { id } = req.params;
+            
+            const query = `
+                DELETE FROM curation_sources
+                WHERE id = $1 AND user_id = $2
+                RETURNING id
+            `;
+            
+            const result = await pool.query(query, [id, req.client.id]);
+            
+            if (result.rows.length === 0) {
+                return res.status(404).json({
+                    error: 'Not found',
+                    message: 'Source introuvable ou non autorisée'
+                });
+            }
+            
+            // Log de l'activité
+            await authModule.logActivity(
+                req.client.id,
+                'delete_curation_source',
+                'curation_source',
+                id,
+                null,
+                req.ip
+            );
+            
+            res.status(204).send();
+            
+        } catch (error) {
+            console.error('Erreur suppression source curation:', error);
+            res.status(500).json({
+                error: 'Internal server error',
+                message: 'Erreur lors de la suppression de la source'
+            });
+        }
+    });
+
+
     return router;
 }
 

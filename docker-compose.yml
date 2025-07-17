@@ -67,7 +67,7 @@ services:
       - "3001:3001" 
     environment:
       - TZ=Europe/Paris
-      - TOOLJET_URL=http://127.0.0.1:8082
+      - TOOLJET_URL=${TOOLJET_SERVER_URL}
       - NODE_ENV=${NODE_ENV:-production}
       - FRONTEND_DB_HOST=postgres
       - FRONTEND_DB_NAME=${FRONTEND_DB_NAME}
@@ -127,8 +127,7 @@ services:
       - PG_PORT=5432
       # Configuration ToolJet
       - TOOLJET_HOST=${TOOLJET_HOST}
-      #- TOOLJET_SERVER_URL=${TOOLJET_SERVER_URL}
-      - TOOLJET_SERVER_URL=http://127.0.0.1:8082
+      - TOOLJET_SERVER_URL=${TOOLJET_SERVER_URL}
       - PORT=8082
       - SECRET_KEY_BASE=${TOOLJET_SECRET_KEY_BASE}
       - ENCRYPTION_KEY=${TOOLJET_ENCRYPTION_KEY}
