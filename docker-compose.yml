@@ -197,6 +197,36 @@ services:
       - api-internal
     profiles: ["production"]
 
+  # --- AJOUT POUR LIBRECHAT ---
+  mongo:
+    image: mongo:latest
+    container_name: mongo
+    restart: always
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - otobot_backend_network
+    profiles:
+      - librechat
+
+  librechat:
+    image: ghcr.io/danny-avila/librechat:latest
+    container_name: librechat
+    restart: always
+    ports:
+      - "3080:3080"
+    volumes:
+      - librechat_images:/app/client/public/images
+      - librechat_plugins:/app/client/public/plugins
+      - ../LibreChat/librechat.yaml:/app/librechat.yaml
+    depends_on:
+      - mongo
+    env_file:
+      - ../LibreChat/.env
+    networks:
+      - otobot_backend_network
+    profiles:
+      - librechat
 # --- Volumes Docker ---
 volumes:
   postgres_data:
@@ -204,6 +234,9 @@ volumes:
   tooljet_data:
   pgadmin_data:
   nginx_logs:
+  mongodb_data:
+  librechat_images:
+  librechat_plugins:
 
 # --- Réseaux Docker ---
 networks:
